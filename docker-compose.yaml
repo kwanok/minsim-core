@@ -1,0 +1,129 @@
+version: "3"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.5.1
+    container_name: zookeeper
+    ports:
+      - "2181:2181"
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_SYNC_LIMIT: 2
+      ZOOKEEPER_SERVER_ID: 1
+
+  broker:
+    image: confluentinc/cp-kafka:7.5.1
+    container_name: broker
+    ports:
+      - "9092:9092"
+    depends_on:
+      - zookeeper
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+
+  schema-registry:
+    image: confluentinc/cp-schema-registry:7.5.1
+    container_name: schema-registry
+    depends_on:
+      - broker
+    ports:
+      - "8081:8081"
+    environment:
+      SCHEMA_REGISTRY_HOST_NAME: schema-registry
+      SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS: "broker:29092"
+      SCHEMA_REGISTRY_LISTENERS: http://schema-registry:8081
+
+  connect:
+    build:
+      context: .
+      dockerfile: kafka/connect/Dockerfile
+    container_name: connect
+    depends_on:
+      - broker
+      - schema-registry
+    ports:
+      - "8083:8083"
+    environment:
+      CONNECT_BOOTSTRAP_SERVERS: "broker:29092"
+      CONNECT_REST_ADVERTISED_HOST_NAME: connect
+      CONNECT_GROUP_ID: kafka-connect
+      CONNECT_CONFIG_STORAGE_TOPIC: _kafka-connect-configs
+      CONNECT_CONFIG_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_OFFSET_STORAGE_TOPIC: _kafka-connect-offsets
+      CONNECT_OFFSET_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_STATUS_STORAGE_TOPIC: _kafka-connect-status
+      CONNECT_STATUS_STORAGE_REPLICATION_FACTOR: 1
+      CONNECT_KEY_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER: org.apache.kafka.connect.storage.StringConverter
+      CONNECT_VALUE_CONVERTER_SCHEMA_REGISTRY_URL: http://schema-registry:8081
+
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: kafka-ui
+    ports:
+      - "23100:8080"
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=broker:29092
+      - KAFKA_CLUSTERS_0_ZOOKEEPER=zookeeper:2181
+
+  postgres:
+    image: postgres:13.1
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres1234
+      POSTGRES_DB: dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command: [ "postgres", "-c", "wal_level=logical" ]
+
+  pgbouncer:
+    image: edoburu/pgbouncer:latest
+    container_name: pgbouncer
+    ports:
+      - "54321:5432"
+    environment:
+      - DB_HOST=postgres
+      - DB_USER=postgres
+      - DB_PASSWORD=postgres1234
+      - DB_NAME=dev
+      - DB_POOL_SIZE=20
+      - DB_POOL_MODE=transaction
+    depends_on:
+      - postgres
+
+  grafana-dashboard:
+    image: grafana/grafana
+    ports:
+      - "3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: grafana
+      GF_SECURITY_ADMIN_PASSWORD: gfpwd1234
+      GF_DASHBOARDS_MIN_REFRESH_INTERVAL: 500ms
+    volumes:
+      - grafana_data:/var/lib/grafana
+
+  redis:
+    image: redis:6.0.9
+    container_name: redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+volumes:
+  postgres_data:
+    external: false
+  grafana_data:
+    external: false
+  redis_data:
+    external: false
